@@ -3,6 +3,11 @@
   packages = [
     pkgs.jdk17
     pkgs.unzip
+    pkgs.cmake
+    pkgs.ninja
+    pkgs.pkg-config
+    pkgs.doas-sudo-shim
+    pkgs.clang            # <-- This is the compiler CMake is looking for
   ];
   idx.extensions = [
     

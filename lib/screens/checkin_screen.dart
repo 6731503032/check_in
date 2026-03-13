@@ -3,7 +3,7 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:camera/camera.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -26,17 +26,17 @@ class _CheckinScreenState extends State<CheckinScreen> {
   final _stepLabels = ['Identity', 'Selfie', 'GPS', 'QR', 'Reflect'];
 
   // ── Step 0 ────────────────────────────────────────────────────────────
-  final _nameCtrl = TextEditingController();
+  final _nameCtrl  = TextEditingController();
   final _emailCtrl = TextEditingController();
   String? _studentName;
   String? _studentEmail;
 
   // ── Step 1 – live camera selfie ───────────────────────────────────────
   CameraController? _camCtrl;
-  bool _camReady = false;
-  bool _camError = false;
+  bool _camReady  = false;
+  bool _camError  = false;
   String? _camErrorMsg;
-  XFile? _capturedPhoto; // holds the taken photo
+  XFile? _capturedPhoto;
 
   // ── Step 2 ────────────────────────────────────────────────────────────
   double? _latitude;
@@ -48,14 +48,13 @@ class _CheckinScreenState extends State<CheckinScreen> {
 
   // ── Step 4 ────────────────────────────────────────────────────────────
   final _prevTopicCtrl = TextEditingController();
-  final _expTopicCtrl = TextEditingController();
+  final _expTopicCtrl  = TextEditingController();
   int _mood = 3;
 
-  bool _isLoading = false;
+  bool _isLoading    = false;
   bool _errorShowing = false;
-  bool _submitting = false;
+  bool _submitting   = false;
 
-  // ─────────────────────────────────────────────────────────────────────
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -93,14 +92,14 @@ class _CheckinScreenState extends State<CheckinScreen> {
 
   // ═══ STEP 0 — Identity ════════════════════════════════════════════════
   void _submitIdentity() {
-    final name = _nameCtrl.text.trim();
+    final name  = _nameCtrl.text.trim();
     final email = _emailCtrl.text.trim().toLowerCase();
     if (name.isEmpty) { _showError('Please enter your name or student ID.'); return; }
     if (!email.endsWith('@$_requiredDomain')) {
       _showError('Email must end with @$_requiredDomain'); return;
     }
     setState(() { _studentName = name; _studentEmail = email; });
-    _initSelfieCamera(); // pre-init camera as we move to step 1
+    _initSelfieCamera();
     setState(() => _step = 1);
   }
 
@@ -108,7 +107,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
   Future<void> _initSelfieCamera() async {
     setState(() { _camReady = false; _camError = false; _camErrorMsg = null; _capturedPhoto = null; });
     try {
-      // Request permission first on mobile
       if (!kIsWeb) {
         final status = await Permission.camera.request();
         if (status.isDenied || status.isPermanentlyDenied) {
@@ -121,7 +119,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
         setState(() { _camError = true; _camErrorMsg = 'No camera found on this device.'; });
         return;
       }
-      // Prefer front camera
       final cam = cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
@@ -151,7 +148,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
   }
 
   Future<void> _retakeSelfie() async {
-    setState(() { _capturedPhoto = null; });
+    setState(() => _capturedPhoto = null);
     await _initSelfieCamera();
   }
 
@@ -171,7 +168,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
         _showError('Location denied permanently. Enable in settings.'); return;
       }
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high)
+              desiredAccuracy: LocationAccuracy.high)
           .timeout(const Duration(seconds: 15));
       setState(() { _latitude = pos.latitude; _longitude = pos.longitude; _step = 3; });
     } catch (e) {
@@ -204,34 +201,30 @@ class _CheckinScreenState extends State<CheckinScreen> {
     setState(() => _submitting = true);
     try {
       final record = AttendanceRecord(
-        id: const Uuid().v4(),
-        studentId: _studentName!,
-        studentEmail: _studentEmail!,
-        checkInTime: DateTime.now(),
-        latitude: _latitude!,
-        longitude: _longitude!,
-        qrData: _qrData!,
+        id:            const Uuid().v4(),
+        studentId:     _studentName!,
+        studentEmail:  _studentEmail!,
+        checkInTime:   DateTime.now(),
+        latitude:      _latitude!,
+        longitude:     _longitude!,
+        qrData:        _qrData!,
         previousTopic: _prevTopicCtrl.text.trim(),
         expectedTopic: _expTopicCtrl.text.trim(),
-        moodBefore: _mood,
+        moodBefore:    _mood,
         facePhotoPath: _capturedPhoto?.path,
       );
 
-      // Fix: on web skip sqflite (it hangs), go straight to Firebase
-      // On mobile save locally first then sync
-      if (!kIsWeb) {
-        await StorageService.insertRecord(record)
-            .timeout(const Duration(seconds: 8), onTimeout: () {
-          debugPrint('Local DB timeout — continuing without local save');
-        });
-      }
+      // ── Save to local store (web = in-memory, mobile = SQLite) ─────────
+      // THIS was the bug: web branch was missing, so _webRecords was never written
+      await StorageService.insertRecord(record);
+      debugPrint('Record inserted: ${record.id}');
 
-      // Firebase sync — best-effort with timeout
+      // ── Firebase sync — best-effort, never blocks ──────────────────────
       try {
         await FirebaseService.saveRecord(record)
             .timeout(const Duration(seconds: 10));
       } catch (e) {
-        debugPrint('Firebase sync failed: $e');
+        debugPrint('Firebase sync failed (non-fatal): $e');
       }
 
       if (mounted) {
@@ -336,7 +329,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
     child: Row(
       children: List.generate(_stepLabels.length, (i) {
         final isActive = _step == i;
-        final isDone = _step > i;
+        final isDone   = _step > i;
         return Expanded(
           child: Row(children: [
             if (i > 0)
@@ -398,7 +391,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
     const Text('Use your @$_requiredDomain email',
         style: TextStyle(color: Colors.grey, fontSize: 13)),
     const SizedBox(height: 28),
-
     _textField(ctrl: _nameCtrl, label: 'Full Name / Student ID',
         hint: 'e.g. John Doe or 6501234567', icon: Icons.person_outline),
     const SizedBox(height: 14),
@@ -412,7 +404,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
 
   // ─── STEP 1: Selfie (live camera) ─────────────────────────────────────
   Widget _buildSelfieStep() {
-    // Photo already taken — show preview
     if (_capturedPhoto != null) {
       return _card(Column(children: [
         const Text('🤳', style: TextStyle(fontSize: 52)),
@@ -447,7 +438,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
       ]));
     }
 
-    // Camera error state
     if (_camError) {
       return _card(Column(children: [
         const Text('📷', style: TextStyle(fontSize: 52)),
@@ -469,7 +459,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
       ]));
     }
 
-    // Camera initialising
     if (!_camReady || _camCtrl == null) {
       return _card(Column(children: [
         const Text('📷', style: TextStyle(fontSize: 52)),
@@ -490,7 +479,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
       ]));
     }
 
-    // Live camera viewfinder
     return _card(Column(children: [
       const Text('🤳', style: TextStyle(fontSize: 52)),
       const SizedBox(height: 12),
@@ -501,8 +489,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
           style: TextStyle(color: Colors.grey, fontSize: 13),
           textAlign: TextAlign.center),
       const SizedBox(height: 20),
-
-      // Live viewfinder — same container style as QR scanner
       Container(
         height: 320,
         decoration: BoxDecoration(
@@ -514,10 +500,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
           child: CameraPreview(_camCtrl!),
         ),
       ),
-
       const SizedBox(height: 20),
-
-      // Capture button
       GestureDetector(
         onTap: _isLoading ? null : _captureSelfie,
         child: AnimatedContainer(
@@ -596,7 +579,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
       const Text('Allow camera access when prompted, then point at the QR code.',
           style: TextStyle(color: Colors.grey, fontSize: 13), textAlign: TextAlign.center),
       const SizedBox(height: 20),
-
       Container(
         height: 280,
         decoration: BoxDecoration(
@@ -639,7 +621,6 @@ class _CheckinScreenState extends State<CheckinScreen> {
           ),
         ),
       ),
-
       const SizedBox(height: 12),
       Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         Container(width: 8, height: 8,
@@ -768,7 +749,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: moods.map((m) {
         final score = m['s'] as int;
-        final sel = current == score;
+        final sel   = current == score;
         return GestureDetector(
           onTap: () => onSelect(score),
           child: AnimatedContainer(

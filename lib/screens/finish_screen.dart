@@ -2,7 +2,7 @@
 // Steps: 0=GPS  1=QR  2=Reflection (includes mood after class)
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:geolocator/geolocator.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -31,8 +31,8 @@ class _FinishScreenState extends State<FinishScreen> {
   final _feedbackCtrl = TextEditingController();
   int _moodAfter = 3;
 
-  bool _isLoading  = false;
-  bool _submitting = false;
+  bool _isLoading    = false;
+  bool _submitting   = false;
   bool _errorShowing = false;
 
   @override
@@ -111,16 +111,19 @@ class _FinishScreenState extends State<FinishScreen> {
     }
     setState(() => _submitting = true);
     try {
-      final updated = widget.record
-        ..finishTime     = DateTime.now()
-        ..finishLatitude  = _latitude
-        ..finishLongitude = _longitude
-        ..finishQrData    = _qrData
-        ..learned         = _learnedCtrl.text.trim()
-        ..feedback        = _feedbackCtrl.text.trim()
-        ..moodAfter       = _moodAfter;
+      // Use copyWith — creates a new object, does NOT mutate widget.record
+      final updated = widget.record.copyWith(
+        finishTime:      DateTime.now(),
+        finishLatitude:  _latitude,
+        finishLongitude: _longitude,
+        finishQrData:    _qrData,
+        learned:         _learnedCtrl.text.trim(),
+        feedback:        _feedbackCtrl.text.trim(),
+        moodAfter:       _moodAfter,
+      );
 
-      // Web: skip SQLite, mobile: save locally with timeout guard
+      // Web: StorageService uses in-memory, no SQLite needed
+      // Mobile: SQLite with timeout guard
       if (!kIsWeb) {
         await StorageService.updateRecord(updated)
             .timeout(const Duration(seconds: 8), onTimeout: () {
