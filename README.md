@@ -1,17 +1,76 @@
-# check_in
+# Class Check-In App
 
-A new Flutter project.
+A Flutter mobile app for university class attendance. Students check in with GPS, QR scan, and a short reflection. At the end of class, they check out the same way.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## Features
 
-A few resources to get you started if this is your first Flutter project:
+- **Check-in** — Identity → Selfie → GPS → QR Scan → Pre-class reflection
+- **Finish Class** — GPS → QR Scan → Post-class reflection + mood tracking
+- **History** — Full attendance log with filters and expandable records
+- Works on **Android, iOS, and Web** (Chrome)
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Tech Stack
+
+| | |
+|---|---|
+| Framework | Flutter (Dart) |
+| Local Storage | SQLite (mobile) / In-memory (web) |
+| Cloud | Firebase Firestore |
+| GPS | geolocator |
+| QR / Camera | mobile_scanner, camera |
+
+---
+
+## Setup
+
+**1. Clone and install dependencies**
+```bash
+flutter pub get
+```
+
+**2. Configure Firebase**
+```bash
+flutterfire configure
+```
+This generates `lib/firebase_options.dart`. Follow the CLI prompts for Android, iOS, and Web.
+
+**3. Run**
+```bash
+# Web
+flutter run -d chrome
+
+# Android
+flutter run -d android
+```
+
+---
+
+## Project Structure
+
+```
+lib/
+├── main.dart
+├── models/
+│   └── attendance_model.dart
+├── screens/
+│   ├── home_screen.dart
+│   ├── checkin_screen.dart
+│   ├── finish_screen.dart
+│   └── history_screen.dart
+└── services/
+    ├── storage_service.dart   # web/mobile storage abstraction
+    ├── db_service.dart        # SQLite (mobile only)
+    └── firebase_service.dart  # Firestore sync
+```
+
+---
+
+## Notes
+
+- Web storage is **session-only** — data resets on page refresh
+- Email must end in `@lamduan.mfu.ac.th` to check in
+- Firebase sync is best-effort — app works offline via local storage
