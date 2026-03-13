@@ -1,0 +1,16 @@
+{
+  "hosting": {
+    "public": "https://github.com/6731503032/check_in.git",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
