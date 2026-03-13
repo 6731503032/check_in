@@ -472,18 +472,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
+    return const Center(
       child: Column(
         children: [
-          const Text('📭', style: TextStyle(fontSize: 52)),
-          const SizedBox(height: 12),
-          const Text('No check-ins yet',
+          Text('📭', style: TextStyle(fontSize: 52)),
+          SizedBox(height: 12),
+          Text('No check-ins yet',
               style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.grey)),
-          const SizedBox(height: 6),
-          const Text('Tap Check-in to record your first attendance.',
+          SizedBox(height: 6),
+          Text('Tap Check-in to record your first attendance.',
               style: TextStyle(fontSize: 13, color: Colors.grey),
               textAlign: TextAlign.center),
         ],

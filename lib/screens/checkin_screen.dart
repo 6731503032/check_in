@@ -395,8 +395,8 @@ class _CheckinScreenState extends State<CheckinScreen> {
     const Text('Identify Yourself',
         style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
     const SizedBox(height: 6),
-    Text('Use your @$_requiredDomain email',
-        style: const TextStyle(color: Colors.grey, fontSize: 13)),
+    const Text('Use your @$_requiredDomain email',
+        style: TextStyle(color: Colors.grey, fontSize: 13)),
     const SizedBox(height: 28),
 
     _textField(ctrl: _nameCtrl, label: 'Full Name / Student ID',
