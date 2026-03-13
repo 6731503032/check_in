@@ -13,11 +13,7 @@ dependencies:
 
   # Firebase
   firebase_core: ^2.24.2
-  firebase_auth: ^4.15.3
   cloud_firestore: ^4.14.0
-
-  # Google Sign-In (works on both mobile AND web)
-  google_sign_in: ^6.2.1
 
   # GPS
   geolocator: ^10.1.0
@@ -25,13 +21,13 @@ dependencies:
   # QR Scanner
   mobile_scanner: ^3.5.5
 
-  # Camera (selfie) — mobile only, skipped on web
-  image_picker: ^1.0.7
+  # Camera (live selfie viewfinder — works on mobile & web)
+  camera: ^0.10.5+9
 
   # Permissions — mobile only
   permission_handler: ^11.3.0
 
-  # Local Storage — mobile only (in-memory on web)
+  # Local Storage — mobile only (skipped on web)
   sqflite: ^2.3.0
   path: ^1.8.3
 

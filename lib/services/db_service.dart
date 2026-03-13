@@ -19,7 +19,7 @@ class DBService {
     final path = join(dbPath, 'checkin.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE attendance (
@@ -33,6 +33,7 @@ class DBService {
             previousTopic TEXT,
             expectedTopic TEXT,
             moodBefore INTEGER,
+            moodAfter INTEGER,
             facePhotoPath TEXT,
             finishTime TEXT,
             finishLatitude REAL,
@@ -47,6 +48,9 @@ class DBService {
         if (oldVersion < 2) {
           await db.execute('ALTER TABLE attendance ADD COLUMN studentEmail TEXT');
           await db.execute('ALTER TABLE attendance ADD COLUMN facePhotoPath TEXT');
+        }
+        if (oldVersion < 3) {
+          await db.execute('ALTER TABLE attendance ADD COLUMN moodAfter INTEGER');
         }
       },
     );
@@ -78,5 +82,10 @@ class DBService {
         limit: 1);
     if (maps.isEmpty) return null;
     return AttendanceRecord.fromMap(maps.first);
+  }
+
+  static Future<void> deleteRecord(String id) async {
+    final db = await database;
+    await db.delete('attendance', where: 'id = ?', whereArgs: [id]);
   }
 }

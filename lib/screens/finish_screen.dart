@@ -27,11 +27,12 @@ class _FinishScreenState extends State<FinishScreen> {
   String? _qrData;
   MobileScannerController? _scannerCtrl;
 
-  final _learnedCtrl = TextEditingController();
+  final _learnedCtrl  = TextEditingController();
   final _feedbackCtrl = TextEditingController();
-  int _moodAfter = 3; // Fix #5: mood after class
+  int _moodAfter = 3;
 
-  bool _isLoading = false;
+  bool _isLoading  = false;
+  bool _submitting = false;
   bool _errorShowing = false;
 
   @override
@@ -44,11 +45,7 @@ class _FinishScreenState extends State<FinishScreen> {
 
   void _goBack() {
     if (_step > 0) {
-      if (_step == 1) {
-        _scannerCtrl?.stop();
-        _scannerCtrl?.dispose();
-        _scannerCtrl = null;
-      }
+      if (_step == 1) { _scannerCtrl?.stop(); _scannerCtrl?.dispose(); _scannerCtrl = null; }
       setState(() => _step--);
     } else {
       Navigator.pop(context);
@@ -68,6 +65,7 @@ class _FinishScreenState extends State<FinishScreen> {
         .then((_) => _errorShowing = false);
   }
 
+  // ── GPS ───────────────────────────────────────────────────────────────
   Future<void> _getLocation() async {
     setState(() => _isLoading = true);
     try {
@@ -78,19 +76,14 @@ class _FinishScreenState extends State<FinishScreen> {
         }
       }
       LocationPermission perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
-      }
+      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
       if (perm == LocationPermission.deniedForever) {
         _showError('Location denied permanently. Enable in settings.'); return;
       }
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
-      setState(() {
-        _latitude = pos.latitude;
-        _longitude = pos.longitude;
-        _step = 1;
-      });
+              desiredAccuracy: LocationAccuracy.high)
+          .timeout(const Duration(seconds: 15));
+      setState(() { _latitude = pos.latitude; _longitude = pos.longitude; _step = 1; });
     } catch (e) {
       _showError('Could not get location: $e');
     } finally {
@@ -98,6 +91,7 @@ class _FinishScreenState extends State<FinishScreen> {
     }
   }
 
+  // ── QR ────────────────────────────────────────────────────────────────
   void _initScanner() {
     _scannerCtrl ??= MobileScannerController(
       detectionSpeed: DetectionSpeed.normal,
@@ -110,57 +104,77 @@ class _FinishScreenState extends State<FinishScreen> {
     setState(() { _qrData = data; _step = 2; });
   }
 
+  // ── Submit ────────────────────────────────────────────────────────────
   Future<void> _submitForm() async {
     if (_learnedCtrl.text.isEmpty || _feedbackCtrl.text.isEmpty) {
       _showError('Please fill in all fields.'); return;
     }
-    setState(() => _isLoading = true);
+    setState(() => _submitting = true);
     try {
       final updated = widget.record
-        ..finishTime = DateTime.now()
-        ..finishLatitude = _latitude
+        ..finishTime     = DateTime.now()
+        ..finishLatitude  = _latitude
         ..finishLongitude = _longitude
-        ..finishQrData = _qrData
-        ..learned = _learnedCtrl.text.trim()
-        ..feedback = _feedbackCtrl.text.trim()
-        ..moodAfter = _moodAfter; // Fix #5
-      await StorageService.updateRecord(updated);
-      await FirebaseService.saveRecord(updated);
+        ..finishQrData    = _qrData
+        ..learned         = _learnedCtrl.text.trim()
+        ..feedback        = _feedbackCtrl.text.trim()
+        ..moodAfter       = _moodAfter;
+
+      // Web: skip SQLite, mobile: save locally with timeout guard
+      if (!kIsWeb) {
+        await StorageService.updateRecord(updated)
+            .timeout(const Duration(seconds: 8), onTimeout: () {
+          debugPrint('Local DB update timeout — continuing');
+        });
+      } else {
+        await StorageService.updateRecord(updated);
+      }
+
+      // Firebase sync — best-effort
+      try {
+        await FirebaseService.saveRecord(updated)
+            .timeout(const Duration(seconds: 10));
+      } catch (e) {
+        debugPrint('Firebase sync failed (finish): $e');
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('🎉 Class finished! Well done!'),
           backgroundColor: Color(0xFF2E7D32),
+          duration: Duration(seconds: 2),
         ));
         Navigator.pop(context);
       }
     } catch (e) {
       _showError('Failed to save: $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) { if (!didPop) _goBack(); },
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF0F4FF),
-        appBar: AppBar(
-          backgroundColor: _primaryColor,
-          foregroundColor: Colors.white,
-          leading: IconButton(
-            tooltip: _step == 0 ? 'Back to Home' : 'Back to ${_stepLabels[_step - 1]}',
-            icon: const Icon(Icons.arrow_back_ios_new_rounded),
-            onPressed: _goBack,
+      child: Stack(children: [
+        Scaffold(
+          backgroundColor: const Color(0xFFF0F4FF),
+          appBar: AppBar(
+            backgroundColor: _primaryColor,
+            foregroundColor: Colors.white,
+            leading: IconButton(
+              tooltip: _step == 0 ? 'Back to Home' : 'Back to ${_stepLabels[_step - 1]}',
+              icon: const Icon(Icons.arrow_back_ios_new_rounded),
+              onPressed: _goBack,
+            ),
+            title: const Text('Finish Class',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            centerTitle: true,
           ),
-          title: const Text('Finish Class',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          centerTitle: true,
-        ),
-        body: Column(
-          children: [
+          body: Column(children: [
             _buildProgressBar(),
             if (_step > 0)
               Container(
@@ -174,8 +188,7 @@ class _FinishScreenState extends State<FinishScreen> {
                           size: 12, color: _primaryColor),
                       const SizedBox(width: 4),
                       Text('Back to ${_stepLabels[_step - 1]}',
-                          style: const TextStyle(
-                              fontSize: 12, color: _primaryColor,
+                          style: const TextStyle(fontSize: 12, color: _primaryColor,
                               fontWeight: FontWeight.w500)),
                     ]),
                   ),
@@ -190,9 +203,34 @@ class _FinishScreenState extends State<FinishScreen> {
                 child: _buildCurrentStep(),
               ),
             ),
-          ],
+          ]),
         ),
-      ),
+
+        // Full-screen submit overlay
+        if (_submitting)
+          Container(
+            color: Colors.black54,
+            child: const Center(
+              child: Card(
+                elevation: 8,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(16))),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    CircularProgressIndicator(color: Color(0xFF2E7D32)),
+                    SizedBox(height: 16),
+                    Text('Saving class record...',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                    SizedBox(height: 4),
+                    Text('Please wait',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+      ]),
     );
   }
 
@@ -202,7 +240,7 @@ class _FinishScreenState extends State<FinishScreen> {
     child: Row(
       children: List.generate(_stepLabels.length, (i) {
         final isActive = _step == i;
-        final isDone = _step > i;
+        final isDone   = _step > i;
         return Expanded(
           child: Row(children: [
             if (i > 0)
@@ -216,19 +254,15 @@ class _FinishScreenState extends State<FinishScreen> {
                   backgroundColor: isDone || isActive ? Colors.white : Colors.white30,
                   child: Text(isDone ? '✓' : '${i + 1}',
                       style: TextStyle(
-                        color: isDone || isActive ? _primaryColor : Colors.white,
-                        fontSize: 10, fontWeight: FontWeight.bold,
-                      )),
+                          color: isDone || isActive ? _primaryColor : Colors.white,
+                          fontSize: 10, fontWeight: FontWeight.bold)),
                 ),
                 const SizedBox(height: 3),
-                Text(_stepLabels[i],
-                    style: TextStyle(
-                      fontSize: 8,
-                      color: isActive ? Colors.white
-                          : (isDone ? Colors.white70 : Colors.white38),
-                      fontWeight:
-                          isActive ? FontWeight.bold : FontWeight.normal,
-                    )),
+                Text(_stepLabels[i], style: TextStyle(
+                  fontSize: 8,
+                  color: isActive ? Colors.white : (isDone ? Colors.white70 : Colors.white38),
+                  fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                )),
               ]),
             ),
           ]),
@@ -247,144 +281,133 @@ class _FinishScreenState extends State<FinishScreen> {
   }
 
   Widget _card(Widget child) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(20),
+    width: double.infinity, padding: const EdgeInsets.all(20),
     decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      boxShadow: [BoxShadow(
-        color: _primaryColor.withValues(alpha: 0.08),
-        blurRadius: 12, offset: const Offset(0, 4),
-      )],
+      color: Colors.white, borderRadius: BorderRadius.circular(16),
+      boxShadow: [BoxShadow(color: _primaryColor.withValues(alpha: 0.08),
+          blurRadius: 12, offset: const Offset(0, 4))],
     ),
     child: child,
   );
 
-  Widget _buildGPSStep() => _card(Column(
-    children: [
-      const Text('📍', style: TextStyle(fontSize: 52)),
-      const SizedBox(height: 12),
-      const Text('Confirm Your Location',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 6),
-      const Text('Records your location at the end of class.',
-          style: TextStyle(color: Colors.grey, fontSize: 13),
-          textAlign: TextAlign.center),
-      const SizedBox(height: 24),
-      if (_latitude != null) ...[
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-              color: const Color(0xFFE8F5E9),
-              borderRadius: BorderRadius.circular(10)),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.check_circle, color: Color(0xFF2E7D32), size: 18),
-            const SizedBox(width: 8),
-            Text('${_latitude!.toStringAsFixed(5)}, ${_longitude!.toStringAsFixed(5)}',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF2E7D32))),
-          ]),
-        ),
-        const SizedBox(height: 16),
-      ],
-      _primaryBtn(
-        label: _isLoading ? 'Locating...' : 'Get GPS Location',
-        icon: Icons.my_location_rounded,
-        loading: _isLoading,
-        onTap: _isLoading ? null : _getLocation,
+  // ─── GPS ──────────────────────────────────────────────────────────────
+  Widget _buildGPSStep() => _card(Column(children: [
+    const Text('📍', style: TextStyle(fontSize: 52)),
+    const SizedBox(height: 12),
+    const Text('Confirm Your Location',
+        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+    const SizedBox(height: 6),
+    const Text('Records your location at the end of class.',
+        style: TextStyle(color: Colors.grey, fontSize: 13),
+        textAlign: TextAlign.center),
+    const SizedBox(height: 24),
+    if (_latitude != null) ...[
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: const Color(0xFFE8F5E9),
+            borderRadius: BorderRadius.circular(10)),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.check_circle, color: Color(0xFF2E7D32), size: 18),
+          const SizedBox(width: 8),
+          Text('${_latitude!.toStringAsFixed(5)}, ${_longitude!.toStringAsFixed(5)}',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF2E7D32))),
+        ]),
       ),
+      const SizedBox(height: 16),
     ],
-  ));
+    _primaryBtn(label: _isLoading ? 'Locating...' : 'Get GPS Location',
+        icon: Icons.my_location_rounded,
+        loading: _isLoading, onTap: _isLoading ? null : _getLocation),
+  ]));
 
+  // ─── QR ───────────────────────────────────────────────────────────────
   Widget _buildQRStep() {
     _initScanner();
-    return _card(Column(
-      children: [
-        const Text('📷', style: TextStyle(fontSize: 52)),
-        const SizedBox(height: 12),
-        const Text('Scan QR Code Again',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 6),
-        const Text('Allow camera when prompted. Confirms you stayed until the end.',
-            style: TextStyle(color: Colors.grey, fontSize: 13),
-            textAlign: TextAlign.center),
-        const SizedBox(height: 20),
-        Container(
-          height: 280,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _primaryColor, width: 2),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: MobileScanner(
-              controller: _scannerCtrl,
-              onDetect: (capture) {
-                final b = capture.barcodes.firstOrNull;
-                if (b?.rawValue != null) _onQRScanned(b!.rawValue!);
-              },
-              errorBuilder: (_, error, __) => Center(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.no_photography_outlined,
-                      size: 48, color: Colors.grey),
-                  const SizedBox(height: 8),
-                  const Text('Camera not available',
-                      style: TextStyle(color: Colors.grey)),
-                  Text(error.errorDetails?.message ?? '',
-                      style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                ]),
-              ),
+    return _card(Column(children: [
+      const Text('📷', style: TextStyle(fontSize: 52)),
+      const SizedBox(height: 12),
+      const Text('Scan QR Code Again',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 6),
+      const Text('Allow camera when prompted. Confirms you stayed until the end.',
+          style: TextStyle(color: Colors.grey, fontSize: 13),
+          textAlign: TextAlign.center),
+      const SizedBox(height: 20),
+      Container(
+        height: 280,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _primaryColor, width: 2),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: MobileScanner(
+            controller: _scannerCtrl,
+            onDetect: (capture) {
+              final b = capture.barcodes.firstOrNull;
+              if (b?.rawValue != null) _onQRScanned(b!.rawValue!);
+            },
+            errorBuilder: (_, error, __) => Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.no_photography_outlined, size: 48, color: Colors.grey),
+                const SizedBox(height: 8),
+                const Text('Camera not available',
+                    style: TextStyle(color: Colors.grey)),
+                Text(error.errorDetails?.message ?? '',
+                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  onPressed: () => _scannerCtrl?.start(),
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Retry'),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: _primaryColor, foregroundColor: Colors.white),
+                ),
+              ]),
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(width: 8, height: 8,
-              decoration: const BoxDecoration(
-                  color: Colors.green, shape: BoxShape.circle)),
-          const SizedBox(width: 6),
-          const Text('Camera active — scanning...',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
-        ]),
-        const SizedBox(height: 10),
-        TextButton.icon(
-          onPressed: _showManualEntry,
-          icon: const Icon(Icons.keyboard_alt_outlined, size: 16),
-          label: const Text('Enter code manually instead'),
+      ),
+      const SizedBox(height: 12),
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(width: 8, height: 8,
+            decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        const Text('Camera active — scanning...',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
+      ]),
+      const SizedBox(height: 10),
+      TextButton.icon(
+        onPressed: _showManualEntry,
+        icon: const Icon(Icons.keyboard_alt_outlined, size: 16),
+        label: const Text('Enter code manually instead'),
+      ),
+    ]));
+  }
+
+  void _showManualEntry() {
+    final c = TextEditingController();
+    showDialog(context: context, builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Text('Enter Class Code'),
+      content: TextField(controller: c,
+          decoration: const InputDecoration(
+              hintText: 'e.g. CS101-2025', border: OutlineInputBorder())),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () {
+            if (c.text.isNotEmpty) { Navigator.pop(context); _onQRScanned(c.text.trim()); }
+          },
+          style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryColor, foregroundColor: Colors.white),
+          child: const Text('Confirm'),
         ),
       ],
     ));
   }
 
-  void _showManualEntry() {
-    final c = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Enter Class Code'),
-        content: TextField(controller: c,
-            decoration: const InputDecoration(
-                hintText: 'e.g. CS101-2025',
-                border: OutlineInputBorder())),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              if (c.text.isNotEmpty) {
-                Navigator.pop(context);
-                _onQRScanned(c.text.trim());
-              }
-            },
-            style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryColor, foregroundColor: Colors.white),
-            child: const Text('Confirm'),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // ─── Reflection ───────────────────────────────────────────────────────
   Widget _buildFormStep() => _card(Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -397,11 +420,10 @@ class _FinishScreenState extends State<FinishScreen> {
           style: TextStyle(color: Colors.grey, fontSize: 13))),
       const SizedBox(height: 20),
 
-      // Mood BEFORE (read-only summary)
+      // Mood before (read-only)
       Container(
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-            color: const Color(0xFFF3F4F6),
+        decoration: BoxDecoration(color: const Color(0xFFF3F4F6),
             borderRadius: BorderRadius.circular(10)),
         child: Row(children: [
           Text(_moodEmoji(widget.record.moodBefore),
@@ -411,8 +433,7 @@ class _FinishScreenState extends State<FinishScreen> {
             const Text('Mood when you arrived',
                 style: TextStyle(fontSize: 11, color: Colors.grey)),
             Text(widget.record.moodLabel,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600)),
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
           ]),
         ]),
       ),
@@ -429,7 +450,6 @@ class _FinishScreenState extends State<FinishScreen> {
           icon: Icons.rate_review_outlined, maxLines: 3),
       const SizedBox(height: 20),
 
-      // Fix #5: Mood AFTER class
       const Text('How are you feeling after class?',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
       const SizedBox(height: 10),
@@ -449,48 +469,46 @@ class _FinishScreenState extends State<FinishScreen> {
           child: Row(children: [
             Text(_moodEmoji(widget.record.moodBefore),
                 style: const TextStyle(fontSize: 20)),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8),
-              child: Icon(Icons.arrow_forward, size: 16, color: Colors.grey),
-            ),
-            Text(_moodEmoji(_moodAfter),
-                style: const TextStyle(fontSize: 20)),
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Icon(Icons.arrow_forward, size: 16, color: Colors.grey)),
+            Text(_moodEmoji(_moodAfter), style: const TextStyle(fontSize: 20)),
             const SizedBox(width: 10),
-            Text(
-              _moodAfter > widget.record.moodBefore
-                  ? '😊 Mood improved after class!'
-                  : '😕 Mood dropped — hope next class is better!',
-              style: TextStyle(
-                fontSize: 12,
-                color: _moodAfter > widget.record.moodBefore
-                    ? const Color(0xFF2E7D32)
-                    : const Color(0xFFE65100),
+            Expanded(
+              child: Text(
+                _moodAfter > widget.record.moodBefore
+                    ? '😊 Mood improved after class!'
+                    : '😕 Mood dropped — hope next class is better!',
+                style: TextStyle(fontSize: 12,
+                    color: _moodAfter > widget.record.moodBefore
+                        ? const Color(0xFF2E7D32)
+                        : const Color(0xFFE65100)),
               ),
             ),
           ]),
         ),
 
       const SizedBox(height: 16),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-            color: const Color(0xFFE8F5E9),
-            borderRadius: BorderRadius.circular(8)),
-        child: Row(children: [
-          const Icon(Icons.qr_code, size: 16, color: Color(0xFF2E7D32)),
-          const SizedBox(width: 8),
-          Expanded(child: Text('QR: $_qrData',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-              overflow: TextOverflow.ellipsis)),
-        ]),
-      ),
+      if (_qrData != null)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(color: const Color(0xFFE8F5E9),
+              borderRadius: BorderRadius.circular(8)),
+          child: Row(children: [
+            const Icon(Icons.qr_code, size: 16, color: Color(0xFF2E7D32)),
+            const SizedBox(width: 8),
+            Expanded(child: Text('QR: $_qrData',
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                overflow: TextOverflow.ellipsis)),
+          ]),
+        ),
       const SizedBox(height: 20),
 
       _primaryBtn(label: 'Submit & Finish Class', icon: Icons.flag_rounded,
-          loading: _isLoading, onTap: _isLoading ? null : _submitForm),
+          loading: _submitting, onTap: _submitting ? null : _submitForm),
     ],
   ));
 
+  // ── Shared widgets ─────────────────────────────────────────────────────
   Widget _moodSelector(int current, void Function(int) onSelect) {
     final moods = [
       {'s': 1, 'e': '😡', 'l': 'Very\nNeg'},
@@ -503,7 +521,7 @@ class _FinishScreenState extends State<FinishScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: moods.map((m) {
         final score = m['s'] as int;
-        final sel = current == score;
+        final sel   = current == score;
         return GestureDetector(
           onTap: () => onSelect(score),
           child: AnimatedContainer(
@@ -512,8 +530,7 @@ class _FinishScreenState extends State<FinishScreen> {
             decoration: BoxDecoration(
               color: sel ? _primaryColor : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: sel ? _primaryColor : Colors.grey.shade300),
+              border: Border.all(color: sel ? _primaryColor : Colors.grey.shade300),
             ),
             child: Column(children: [
               Text(m['e'] as String, style: const TextStyle(fontSize: 24)),
@@ -539,8 +556,7 @@ class _FinishScreenState extends State<FinishScreen> {
   }) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(label, style: const TextStyle(
-          fontWeight: FontWeight.bold, fontSize: 13)),
+      Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
       const SizedBox(height: 6),
       TextField(
         controller: ctrl, maxLines: maxLines,
@@ -549,8 +565,7 @@ class _FinishScreenState extends State<FinishScreen> {
           hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
           prefixIcon: Icon(icon, size: 18, color: Colors.grey),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           filled: true, fillColor: const Color(0xFFF8FAFF),
         ),
       ),
@@ -558,10 +573,8 @@ class _FinishScreenState extends State<FinishScreen> {
   );
 
   Widget _primaryBtn({
-    required String label,
-    IconData? icon,
-    bool loading = false,
-    VoidCallback? onTap,
+    required String label, IconData? icon,
+    bool loading = false, VoidCallback? onTap,
   }) => SizedBox(
     width: double.infinity,
     child: ElevatedButton.icon(
@@ -573,8 +586,7 @@ class _FinishScreenState extends State<FinishScreen> {
       label: Text(label,
           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
       style: ElevatedButton.styleFrom(
-        backgroundColor: _primaryColor,
-        foregroundColor: Colors.white,
+        backgroundColor: _primaryColor, foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
